@@ -1,4 +1,4 @@
-package com.example;
+package com.whippahh.progressscape;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
@@ -27,9 +27,8 @@ import java.util.regex.Pattern;
 		description = "Syncs your quests, diaries, boss KC and collection log to ProgressScape",
 		tags = {"progressscape", "quests", "diaries", "bosses", "sync"}
 )
-public class ExamplePlugin extends Plugin
+public class ProgressScapePlugin extends Plugin
 {
-	// Matches: "Your Zulrah kill count is: 441."
 	private static final Pattern KC_PATTERN =
 			Pattern.compile("Your (.+) kill count is: (\\d+)\\.");
 
@@ -37,7 +36,7 @@ public class ExamplePlugin extends Plugin
 	private Client client;
 
 	@Inject
-	private ExampleConfig config;
+	private ProgressScapeConfig config;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -47,24 +46,19 @@ public class ExamplePlugin extends Plugin
 
 	private ProgressScapePanel panel;
 	private NavigationButton navButton;
-
-	// Tracks whether we need to fire the login sync on the next tick
 	private boolean pendingLoginSync = false;
 
 	@Override
 	protected void startUp() throws Exception
 	{
 		panel = new ProgressScapePanel(this);
-
 		BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-
 		navButton = NavigationButton.builder()
 				.tooltip("ProgressScape")
 				.icon(icon)
 				.priority(5)
 				.panel(panel)
 				.build();
-
 		clientToolbar.addNavigation(navButton);
 		log.debug("ProgressScape started");
 	}
@@ -81,12 +75,10 @@ public class ExamplePlugin extends Plugin
 	{
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			// Don't sync immediately — wait for the next tick so game data is ready
 			pendingLoginSync = true;
 		}
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
-			// Logged out — fire final sync then clear KC cache
 			syncNow(false);
 			syncService.clearKCs();
 		}
@@ -105,9 +97,7 @@ public class ExamplePlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		// Only care about game messages
 		if (event.getType() != ChatMessageType.GAMEMESSAGE) return;
-
 		String message = event.getMessage();
 		Matcher matcher = KC_PATTERN.matcher(message);
 		if (matcher.matches())
@@ -119,10 +109,6 @@ public class ExamplePlugin extends Plugin
 		}
 	}
 
-	/**
-	 * Called by the panel button (includeCollectionLog=true)
-	 * and internally on login/logout (includeCollectionLog=false).
-	 */
 	public void syncNow(boolean includeCollectionLog)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
@@ -130,20 +116,17 @@ public class ExamplePlugin extends Plugin
 			panel.setStatus("Not logged in");
 			return;
 		}
-
 		Player local = client.getLocalPlayer();
 		if (local == null) return;
-
 		String username = local.getName();
 		if (username == null || username.isEmpty()) return;
-
 		panel.setStatus("Syncing...");
 		syncService.sync(username, includeCollectionLog, client, config, panel);
 	}
 
 	@Provides
-	ExampleConfig provideConfig(ConfigManager configManager)
+	ProgressScapeConfig provideConfig(ConfigManager configManager)
 	{
-		return configManager.getConfig(ExampleConfig.class);
+		return configManager.getConfig(ProgressScapeConfig.class);
 	}
 }
