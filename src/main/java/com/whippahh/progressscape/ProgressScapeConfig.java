@@ -1,11 +1,11 @@
-package com.example;
+package com.whippahh.progressscape;
 
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 
 @ConfigGroup("progressscape")
-public interface ExampleConfig extends Config
+public interface ProgressScapeConfig extends Config
 {
 	@ConfigItem(
 			keyName = "supabaseUrl",
@@ -27,6 +27,6 @@ public interface ExampleConfig extends Config
 	)
 	default String supabaseKey()
 	{
-		return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiZm52aWpmamJveGhhbWptbGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NjcwNDYsImV4cCI6MjA4OTA0MzA0Nn0.wg9Ho_rZBXqH7ulFkT4p1pAamC5bpBDTRXI75_rCPAY";
+		return "";
 	}
 }
