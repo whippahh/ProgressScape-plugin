@@ -27,6 +27,8 @@ import java.util.concurrent.Executors;
 public class SyncService
 {
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final String SUPABASE_URL = "https://hbfnvijfjboxhamjmlhm.supabase.co";
+    private static final String SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiZm52aWpmamJveGhhbWptbGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NjcwNDYsImV4cCI6MjA4OTA0MzA0Nn0.wg9Ho_rZBXqH7ulFkT4p1pAamC5bpBDTRXI75_rCPAY";
 
     private static final int COLLECTION_LOG_GROUP_ID = 621;
     private static final int COLLECTION_LOG_ITEMS_CONTAINER = 36;
@@ -54,7 +56,7 @@ public class SyncService
     }
 
     public void sync(String username, boolean includeCollectionLog,
-                     Client client, ProgressScapeConfig config, ProgressScapePanel panel)
+                     Client client, ProgressScapePanel panel)
     {
         JsonObject quests = new JsonObject();
         for (Quest quest : Quest.values())
@@ -93,21 +95,20 @@ public class SyncService
         payload.add("bosses", bosses);
 
         final JsonObject finalCL = collectionLog;
-        executor.submit(() -> sendToSupabase(payload, finalCL, config.supabaseUrl(),
-                config.supabaseKey(), panel));
+        executor.submit(() -> sendToSupabase(payload, finalCL, panel));
     }
 
     private void sendToSupabase(JsonObject payload, JsonObject collectionLog,
-                                String url, String key, ProgressScapePanel panel)
+                                ProgressScapePanel panel)
     {
         try
         {
             String username = payload.get("username").getAsString();
 
             Request playerRequest = new Request.Builder()
-                    .url(url + "/rest/v1/players?on_conflict=username")
-                    .header("apikey", key)
-                    .header("Authorization", "Bearer " + key)
+                    .url(SUPABASE_URL + "/rest/v1/players?on_conflict=username")
+                    .header("apikey", SUPABASE_KEY)
+                    .header("Authorization", "Bearer " + SUPABASE_KEY)
                     .header("Content-Type", "application/json")
                     .header("Prefer", "resolution=merge-duplicates")
                     .post(RequestBody.create(JSON, gson.toJson(payload)))
@@ -130,9 +131,9 @@ public class SyncService
                 clPayload.add("log_data", collectionLog);
 
                 Request clRequest = new Request.Builder()
-                        .url(url + "/rest/v1/collection_log?on_conflict=username")
-                        .header("apikey", key)
-                        .header("Authorization", "Bearer " + key)
+                        .url(SUPABASE_URL + "/rest/v1/collection_log?on_conflict=username")
+                        .header("apikey", SUPABASE_KEY)
+                        .header("Authorization", "Bearer " + SUPABASE_KEY)
                         .header("Content-Type", "application/json")
                         .header("Prefer", "resolution=merge-duplicates")
                         .post(RequestBody.create(JSON, gson.toJson(clPayload)))
