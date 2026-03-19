@@ -1,6 +1,5 @@
 package com.whippahh.progressscape;
 
-import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -10,7 +9,6 @@ import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -33,9 +31,6 @@ public class ProgressScapePlugin extends Plugin
 
 	@Inject
 	private Client client;
-
-	@Inject
-	private ProgressScapeConfig config;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -121,11 +116,5 @@ public class ProgressScapePlugin extends Plugin
 		if (username == null || username.isEmpty()) return;
 		panel.setStatus("Syncing...");
 		syncService.sync(username, includeCollectionLog, client, panel);
-	}
-
-	@Provides
-	ProgressScapeConfig provideConfig(ConfigManager configManager)
-	{
-		return configManager.getConfig(ProgressScapeConfig.class);
 	}
 }
