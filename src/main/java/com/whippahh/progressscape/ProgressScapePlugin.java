@@ -16,7 +16,6 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
-import net.runelite.client.util.ImageUtil;
 import java.awt.image.BufferedImage;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -121,7 +120,7 @@ public class ProgressScapePlugin extends Plugin
 		String username = local.getName();
 		if (username == null || username.isEmpty()) return;
 		panel.setStatus("Syncing...");
-		syncService.sync(username, includeCollectionLog, client, config, panel);
+		syncService.sync(username, includeCollectionLog, client, panel);
 	}
 
 	@Provides
