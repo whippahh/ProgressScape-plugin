@@ -1,4 +1,4 @@
-package com.example;
+package com.whippahh.progressscape;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -38,36 +38,24 @@ public class SyncService
     @Inject
     private Gson gson;
 
-    // Boss KC map — populated by ExamplePlugin when it sees KC chat messages
     private final Map<String, Integer> bossKCs = new HashMap<>();
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    /**
-     * Called by ExamplePlugin when it parses a boss KC chat message.
-     * e.g. "Your Zulrah kill count is: 441."
-     */
     public void updateBossKC(String bossName, int kc)
     {
         bossKCs.put(bossName, kc);
         log.debug("KC updated: {} = {}", bossName, kc);
     }
 
-    /**
-     * Clears the KC map on logout so stale data doesn't carry over.
-     */
     public void clearKCs()
     {
         bossKCs.clear();
     }
 
-    /**
-     * Builds the payload and fires the sync in the background.
-     */
     public void sync(String username, boolean includeCollectionLog,
-                     Client client, ExampleConfig config, ProgressScapePanel panel)
+                     Client client, ProgressScapeConfig config, ProgressScapePanel panel)
     {
-        // --- Quests ---
         JsonObject quests = new JsonObject();
         for (Quest quest : Quest.values())
         {
@@ -75,17 +63,14 @@ public class SyncService
             quests.addProperty(quest.getName(), state.name());
         }
 
-        // --- Achievement Diaries ---
         JsonObject diaries = buildDiaries(client);
 
-        // --- Boss KCs ---
         JsonObject bosses = new JsonObject();
         for (Map.Entry<String, Integer> entry : bossKCs.entrySet())
         {
             bosses.addProperty(entry.getKey(), entry.getValue());
         }
 
-        // --- Collection Log (only on manual sync) ---
         JsonObject collectionLog = null;
         if (includeCollectionLog)
         {
@@ -97,11 +82,9 @@ public class SyncService
             }
         }
 
-        // --- Account type (raw varplayer 1777) ---
         int accountTypeId = client.getVarpValue(ACCOUNT_TYPE_VARPLAYER);
         String accountType = accountTypeFromId(accountTypeId);
 
-        // Build payload
         JsonObject payload = new JsonObject();
         payload.addProperty("username", username);
         payload.addProperty("account_type", accountType);
@@ -114,10 +97,6 @@ public class SyncService
                 config.supabaseKey(), panel));
     }
 
-    // -------------------------------------------------------------------------
-    // HTTP
-    // -------------------------------------------------------------------------
-
     private void sendToSupabase(JsonObject payload, JsonObject collectionLog,
                                 String url, String key, ProgressScapePanel panel)
     {
@@ -125,7 +104,6 @@ public class SyncService
         {
             String username = payload.get("username").getAsString();
 
-            // OkHttp 3.x (bundled in RuneLite): create(MediaType, String)
             Request playerRequest = new Request.Builder()
                     .url(url + "/rest/v1/players?on_conflict=username")
                     .header("apikey", key)
@@ -185,10 +163,6 @@ public class SyncService
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Diary builder
-    // -------------------------------------------------------------------------
-
     private JsonObject buildDiaries(Client client)
     {
         JsonObject diaries = new JsonObject();
@@ -227,10 +201,6 @@ public class SyncService
         return diaries;
     }
 
-    // -------------------------------------------------------------------------
-    // Collection log builder
-    // -------------------------------------------------------------------------
-
     private JsonObject buildCollectionLog(Client client)
     {
         Widget logContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, COLLECTION_LOG_ITEMS_CONTAINER);
@@ -258,10 +228,6 @@ public class SyncService
         log.add(category, obtained);
         return log;
     }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
 
     private String accountTypeFromId(int id)
     {
