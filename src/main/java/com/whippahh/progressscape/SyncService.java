@@ -1,6 +1,7 @@
 package com.whippahh.progressscape;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -67,6 +68,8 @@ public class SyncService
 
         JsonObject diaries = buildDiaries(client);
 
+        JsonArray caCompleted = buildCombatAchievements(client);
+
         JsonObject bosses = new JsonObject();
         for (Map.Entry<String, Integer> entry : bossKCs.entrySet())
         {
@@ -92,6 +95,7 @@ public class SyncService
         payload.addProperty("account_type", accountType);
         payload.add("quests", quests);
         payload.add("diaries", diaries);
+        payload.add("ca_completed", caCompleted);
         payload.add("bosses", bosses);
 
         final JsonObject finalCL = collectionLog;
@@ -162,6 +166,19 @@ public class SyncService
             log.warn("ProgressScape sync error", e);
             panel.setStatus("Sync error — check connection");
         }
+    }
+
+    private JsonArray buildCombatAchievements(Client client)
+    {
+        JsonArray completed = new JsonArray();
+        for (CombatAchievement task : CombatAchievement.values())
+        {
+            if (task.isCompleted(client))
+            {
+                completed.add(task.getTaskName());
+            }
+        }
+        return completed;
     }
 
     private JsonObject buildDiaries(Client client)
