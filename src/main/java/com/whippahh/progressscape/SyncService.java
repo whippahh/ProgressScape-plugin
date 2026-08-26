@@ -2,13 +2,13 @@ package com.whippahh.progressscape;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Varbits;
-import net.runelite.api.widgets.Widget;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -18,8 +18,11 @@ import okhttp3.Response;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,9 +34,12 @@ public class SyncService
     private static final String SUPABASE_URL = "https://hbfnvijfjboxhamjmlhm.supabase.co";
     private static final String SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiZm52aWpmamJveGhhbWptbGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NjcwNDYsImV4cCI6MjA4OTA0MzA0Nn0.wg9Ho_rZBXqH7ulFkT4p1pAamC5bpBDTRXI75_rCPAY";
 
-    private static final int COLLECTION_LOG_GROUP_ID = 621;
-    private static final int COLLECTION_LOG_ITEMS_CONTAINER = 36;
     private static final int ACCOUNT_TYPE_VARPLAYER = 1777;
+
+    // Same public endpoint RuneLite's own Hiscore panel queries. Gives full
+    // lifetime KC for every ranked boss in one request — no session/chat
+    // message limitation like the old bossKCs-only approach had.
+    private static final String HISCORE_URL = "https://secure.runescape.com/m=hiscore_oldschool/index_lite.json";
 
     @Inject
     private OkHttpClient httpClient;
@@ -42,6 +48,12 @@ public class SyncService
     private Gson gson;
 
     private final Map<String, Integer> bossKCs = new HashMap<>();
+
+    // Populated by ProgressScapePlugin's clientscript-4100 listener as
+    // collection log item slots get built (whether from natural browsing or
+    // the search-all burst triggered by the Sync button). Never cleared, so
+    // it only grows across the client session — repeated syncs accumulate.
+    private final Set<String> collectionLogObtained = ConcurrentHashMap.newKeySet();
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -54,6 +66,17 @@ public class SyncService
     public void clearKCs()
     {
         bossKCs.clear();
+    }
+
+    public void recordCollectionLogItem(String rawName)
+    {
+        if (rawName == null || rawName.isEmpty()) return;
+        String clean = rawName.replaceAll("<[^>]+>", "").trim();
+        if (clean.isEmpty()) return;
+        if (collectionLogObtained.add(clean))
+        {
+            log.debug("Collection log item captured: {}", clean);
+        }
     }
 
     public void sync(String username, boolean includeCollectionLog,
@@ -70,21 +93,26 @@ public class SyncService
 
         JsonArray caCompleted = buildCombatAchievements(client);
 
-        JsonObject bosses = new JsonObject();
-        for (Map.Entry<String, Integer> entry : bossKCs.entrySet())
-        {
-            bosses.addProperty(entry.getKey(), entry.getValue());
-        }
+        // Snapshot of this-session live chat captures. The full boss list is
+        // actually built on the background thread in sendToSupabase(), merged
+        // with a hiscores lookup — see the comment there for why.
+        Map<String, Integer> bossKCSnapshot = new HashMap<>(bossKCs);
 
         JsonObject collectionLog = null;
         if (includeCollectionLog)
         {
-            collectionLog = buildCollectionLog(client);
-            if (collectionLog == null)
+            if (collectionLogObtained.isEmpty())
             {
-                panel.setStatus("Open your Collection Log first!");
+                panel.setStatus("No collection log items captured — try again");
                 return;
             }
+            JsonArray obtained = new JsonArray();
+            for (String name : collectionLogObtained)
+            {
+                obtained.add(name);
+            }
+            collectionLog = new JsonObject();
+            collectionLog.add("All", obtained);
         }
 
         int accountTypeId = client.getVarpValue(ACCOUNT_TYPE_VARPLAYER);
@@ -96,18 +124,31 @@ public class SyncService
         payload.add("quests", quests);
         payload.add("diaries", diaries);
         payload.add("ca_completed", caCompleted);
-        payload.add("bosses", bosses);
+        // NOTE: "bosses" is intentionally not added here — sendToSupabase
+        // adds it after merging a hiscores lookup (a network call, so it
+        // belongs on the background thread) with bossKCSnapshot.
 
         final JsonObject finalCL = collectionLog;
-        executor.submit(() -> sendToSupabase(payload, finalCL, panel));
+        executor.submit(() -> sendToSupabase(payload, finalCL, bossKCSnapshot, panel));
     }
 
     private void sendToSupabase(JsonObject payload, JsonObject collectionLog,
-                                ProgressScapePanel panel)
+                                Map<String, Integer> bossKCSnapshot, ProgressScapePanel panel)
     {
         try
         {
             String username = payload.get("username").getAsString();
+
+            // Hiscores gives full lifetime KC for every ranked boss — the
+            // same public endpoint RuneLite's own Hiscore panel uses. Live
+            // in-session chat captures are merged on top since they can be
+            // fresher than hiscores, which lags behind by several minutes.
+            JsonObject bosses = fetchHiscoreBosses(username);
+            for (Map.Entry<String, Integer> entry : bossKCSnapshot.entrySet())
+            {
+                bosses.addProperty(entry.getKey(), entry.getValue());
+            }
+            payload.add("bosses", bosses);
 
             Request playerRequest = new Request.Builder()
                     .url(SUPABASE_URL + "/rest/v1/players?on_conflict=username")
@@ -152,7 +193,7 @@ public class SyncService
                         return;
                     }
                 }
-                panel.setStatus("Collection log synced!");
+                panel.setStatus("Collection log synced! (" + collectionLogObtained.size() + " items)");
             }
             else
             {
@@ -166,6 +207,52 @@ public class SyncService
             log.warn("ProgressScape sync error", e);
             panel.setStatus("Sync error — check connection");
         }
+    }
+
+    /**
+     * Queries the public OSRS hiscores (the same endpoint RuneLite's own
+     * Hiscore panel uses) for every ranked activity's score. This includes
+     * bosses and raids, but also clue scrolls, minigames, league points etc.
+     * — we don't filter those out here; the website only acts on names it
+     * recognizes as bosses, so any extra non-boss entries are harmless.
+     */
+    private JsonObject fetchHiscoreBosses(String username)
+    {
+        JsonObject bosses = new JsonObject();
+        try
+        {
+            String url = HISCORE_URL + "?player=" + URLEncoder.encode(username, "UTF-8");
+            Request request = new Request.Builder().url(url).build();
+            try (Response response = httpClient.newCall(request).execute())
+            {
+                if (!response.isSuccessful() || response.body() == null)
+                {
+                    log.debug("Hiscore lookup failed for {}: {}", username, response.code());
+                    return bosses;
+                }
+                JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+                JsonArray activities = (root != null) ? root.getAsJsonArray("activities") : null;
+                if (activities == null) return bosses;
+
+                for (JsonElement el : activities)
+                {
+                    JsonObject activity = el.getAsJsonObject();
+                    String name = activity.get("name").getAsString();
+                    int score = activity.get("score").getAsInt();
+                    // score is -1 when unranked (never done, or below the
+                    // hiscore cutoff) — only forward entries actually ranked.
+                    if (score >= 0)
+                    {
+                        bosses.addProperty(name, score);
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Hiscore boss lookup failed for {}", username, e);
+        }
+        return bosses;
     }
 
     private JsonArray buildCombatAchievements(Client client)
@@ -217,34 +304,6 @@ public class SyncService
         }
 
         return diaries;
-    }
-
-    private JsonObject buildCollectionLog(Client client)
-    {
-        Widget logContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, COLLECTION_LOG_ITEMS_CONTAINER);
-        if (logContainer == null || logContainer.isHidden())
-        {
-            return null;
-        }
-
-        JsonObject log = new JsonObject();
-        Widget[] items = logContainer.getDynamicChildren();
-        if (items == null) return log;
-
-        Widget header = client.getWidget(COLLECTION_LOG_GROUP_ID, 19);
-        String category = (header != null) ? header.getText() : "Unknown";
-
-        com.google.gson.JsonArray obtained = new com.google.gson.JsonArray();
-        for (Widget item : items)
-        {
-            if (item.getOpacity() == 0 && item.getName() != null && !item.getName().isEmpty())
-            {
-                obtained.add(item.getName().replaceAll("<[^>]+>", "").trim());
-            }
-        }
-
-        log.add(category, obtained);
-        return log;
     }
 
     private String accountTypeFromId(int id)

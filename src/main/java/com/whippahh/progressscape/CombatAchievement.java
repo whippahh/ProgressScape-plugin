@@ -1,9 +1,21 @@
 package com.whippahh.progressscape;
 
+import net.runelite.api.gameval.VarPlayerID;
+
 /**
  * Combat Achievement tasks in their in-game order (0-indexed).
- * Completion is stored as individual bits within VarPlayers starting at 2616.
- * Task N: varp = 2616 + (N / 32), bit = N % 32
+ * Completion is stored as individual bits within VarPlayers, one bit per
+ * task, 32 tasks per varp. Previously this used a hand-guessed base varp
+ * (2616) which was wrong and made every task read as incomplete. Fixed to
+ * use RuneLite's own officially-generated CA_TASK_COMPLETED_N constants
+ * instead (confirmed against the ehubbartt/combat-achievements-tracker
+ * plugin's implementation, 2026-08-26) — task N: varp =
+ * CA_TASK_VARPS[N / 32], bit = N % 32.
+ *
+ * Caveat: this still assumes this enum's declaration order matches Jagex's
+ * true internal task ordering. That's unverified — if some tasks come back
+ * with the wrong obtained/not-obtained status after this fix, the ordering
+ * (not the varp source) is the next thing to check.
  */
 public enum CombatAchievement
 {
@@ -645,6 +657,19 @@ public enum CombatAchievement
     CONTRACT_CHOREOGRAPHER("Contract Choreographer"),
     ZULRAH_SPEED_RUNNER("Zulrah Speed-Runner");
 
+    private static final int[] CA_TASK_VARPS = {
+        VarPlayerID.CA_TASK_COMPLETED_0,  VarPlayerID.CA_TASK_COMPLETED_1,
+        VarPlayerID.CA_TASK_COMPLETED_2,  VarPlayerID.CA_TASK_COMPLETED_3,
+        VarPlayerID.CA_TASK_COMPLETED_4,  VarPlayerID.CA_TASK_COMPLETED_5,
+        VarPlayerID.CA_TASK_COMPLETED_6,  VarPlayerID.CA_TASK_COMPLETED_7,
+        VarPlayerID.CA_TASK_COMPLETED_8,  VarPlayerID.CA_TASK_COMPLETED_9,
+        VarPlayerID.CA_TASK_COMPLETED_10, VarPlayerID.CA_TASK_COMPLETED_11,
+        VarPlayerID.CA_TASK_COMPLETED_12, VarPlayerID.CA_TASK_COMPLETED_13,
+        VarPlayerID.CA_TASK_COMPLETED_14, VarPlayerID.CA_TASK_COMPLETED_15,
+        VarPlayerID.CA_TASK_COMPLETED_16, VarPlayerID.CA_TASK_COMPLETED_17,
+        VarPlayerID.CA_TASK_COMPLETED_18, VarPlayerID.CA_TASK_COMPLETED_19,
+    };
+
     private final String taskName;
 
     CombatAchievement(String taskName)
@@ -659,13 +684,14 @@ public enum CombatAchievement
 
     /**
      * Returns true if this task is completed.
-     * CA tasks are stored as bits within VarPlayers 2616-2635.
      */
     public boolean isCompleted(net.runelite.api.Client client)
     {
         int index = this.ordinal();
-        int varpId = 2616 + (index / 32);
+        int varpIndex = index / 32;
         int bit = index % 32;
-        return ((client.getVarpValue(varpId) >> bit) & 1) == 1;
+        if (varpIndex >= CA_TASK_VARPS.length) return false;
+        int varpValue = client.getVarpValue(CA_TASK_VARPS[varpIndex]);
+        return (varpValue & (1 << bit)) != 0;
     }
 }
