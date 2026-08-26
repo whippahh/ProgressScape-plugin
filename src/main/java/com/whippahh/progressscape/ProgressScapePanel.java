@@ -1,6 +1,7 @@
 package com.whippahh.progressscape;
 
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.LinkBrowser;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -9,10 +10,8 @@ import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
-import java.awt.Desktop;
 import java.awt.Font;
 import java.awt.GridLayout;
-import java.net.URI;
 
 public class ProgressScapePanel extends PluginPanel
 {
@@ -49,14 +48,7 @@ public class ProgressScapePanel extends PluginPanel
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e)
             {
-                try
-                {
-                    Desktop.getDesktop().browse(new URI("https://progressscape.net"));
-                }
-                catch (Exception ex)
-                {
-                    // ignore
-                }
+                LinkBrowser.browse("https://progressscape.net");
             }
         });
         centrePanel.add(websiteLink);
