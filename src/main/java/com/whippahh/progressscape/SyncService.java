@@ -9,6 +9,7 @@ import net.runelite.api.Client;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Varbits;
+import net.runelite.api.gameval.VarPlayerID;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -36,6 +37,40 @@ public class SyncService
 
     private static final int ACCOUNT_TYPE_VARPLAYER = 1777;
 
+    // ── Combat Achievements ─────────────────────────────────────────────
+    // Completion is stored as one bit per task across 20 sequential
+    // VarPlayers, 32 tasks per varp. The bit a task uses is NOT its position
+    // in any list we maintain — it is an id Jagex stores on that task's
+    // struct in the game cache (param 1306).
+    //
+    // The previous implementation assumed a hand-authored 637-entry enum's
+    // declaration order matched those ids. It doesn't, so completions were
+    // read from the wrong bits — which is why e.g. Barrows tasks came back
+    // missing despite being done.
+    //
+    // Instead, walk the game's own per-tier enums (each lists that tier's
+    // task struct ids) and read the real id and name straight off each
+    // struct. No hand-maintained task list, no ordering assumption, and new
+    // tasks Jagex adds are picked up without a plugin update. Approach
+    // confirmed against the open-source cdfisher/ca-export plugin.
+    //
+    // Must run on the client thread — sync() is already called from there.
+    private static final int[] CA_TIER_ENUMS = { 3981, 3982, 3983, 3984, 3985, 3986 };
+    private static final int CA_PARAM_TASK_ID = 1306;
+    private static final int CA_PARAM_TASK_NAME = 1308;
+    private static final int[] CA_TASK_VARPS = {
+            VarPlayerID.CA_TASK_COMPLETED_0,  VarPlayerID.CA_TASK_COMPLETED_1,
+            VarPlayerID.CA_TASK_COMPLETED_2,  VarPlayerID.CA_TASK_COMPLETED_3,
+            VarPlayerID.CA_TASK_COMPLETED_4,  VarPlayerID.CA_TASK_COMPLETED_5,
+            VarPlayerID.CA_TASK_COMPLETED_6,  VarPlayerID.CA_TASK_COMPLETED_7,
+            VarPlayerID.CA_TASK_COMPLETED_8,  VarPlayerID.CA_TASK_COMPLETED_9,
+            VarPlayerID.CA_TASK_COMPLETED_10, VarPlayerID.CA_TASK_COMPLETED_11,
+            VarPlayerID.CA_TASK_COMPLETED_12, VarPlayerID.CA_TASK_COMPLETED_13,
+            VarPlayerID.CA_TASK_COMPLETED_14, VarPlayerID.CA_TASK_COMPLETED_15,
+            VarPlayerID.CA_TASK_COMPLETED_16, VarPlayerID.CA_TASK_COMPLETED_17,
+            VarPlayerID.CA_TASK_COMPLETED_18, VarPlayerID.CA_TASK_COMPLETED_19,
+    };
+
     // Same public endpoint RuneLite's own Hiscore panel queries. Gives full
     // lifetime KC for every ranked boss in one request — no session/chat
     // message limitation like the old bossKCs-only approach had.
@@ -57,6 +92,13 @@ public class SyncService
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
+    // The exact JSON last accepted by the players table. Each upsert rewrites
+    // every column — all quests, all diaries, every CA name, every boss KC —
+    // so an unchanged re-send costs a full row rewrite, a dead tuple, TOAST
+    // churn and the autovacuum to clean it up, for nothing. Most syncs send
+    // byte-identical data, so comparing first skips the write entirely.
+    private String lastPlayersPayload = null;
+
     public void updateBossKC(String bossName, int kc)
     {
         bossKCs.put(bossName, kc);
@@ -66,6 +108,12 @@ public class SyncService
     public void clearKCs()
     {
         bossKCs.clear();
+    }
+
+    /** Called on logout — captured items belong to the account that was logged in. */
+    public void clearCollectionLog()
+    {
+        collectionLogObtained.clear();
     }
 
     public void recordCollectionLogItem(String rawName)
@@ -150,23 +198,39 @@ public class SyncService
             }
             payload.add("bosses", bosses);
 
-            Request playerRequest = new Request.Builder()
-                    .url(SUPABASE_URL + "/rest/v1/players?on_conflict=username")
-                    .header("apikey", SUPABASE_KEY)
-                    .header("Authorization", "Bearer " + SUPABASE_KEY)
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", "resolution=merge-duplicates")
-                    .post(RequestBody.create(JSON, gson.toJson(payload)))
-                    .build();
+            String payloadJson = gson.toJson(payload);
+            boolean playersUnchanged = payloadJson.equals(lastPlayersPayload);
 
-            try (Response response = httpClient.newCall(playerRequest).execute())
+            if (playersUnchanged && collectionLog == null)
             {
-                if (!response.isSuccessful())
+                // Nothing to say and nothing else to send — don't touch the DB.
+                log.debug("ProgressScape: player data unchanged, skipping write");
+                panel.setStatus("Already up to date");
+                return;
+            }
+
+            if (!playersUnchanged)
+            {
+                Request playerRequest = new Request.Builder()
+                        .url(SUPABASE_URL + "/rest/v1/players?on_conflict=username")
+                        .header("apikey", SUPABASE_KEY)
+                        .header("Authorization", "Bearer " + SUPABASE_KEY)
+                        .header("Content-Type", "application/json")
+                        .header("Prefer", "resolution=merge-duplicates")
+                        .post(RequestBody.create(JSON, payloadJson))
+                        .build();
+
+                try (Response response = httpClient.newCall(playerRequest).execute())
                 {
-                    log.warn("ProgressScape player sync failed: {}", response.code());
-                    panel.setStatus("Sync failed (" + response.code() + ")");
-                    return;
+                    if (!response.isSuccessful())
+                    {
+                        log.warn("ProgressScape player sync failed: {}", response.code());
+                        panel.setStatus("Sync failed (" + response.code() + ")");
+                        return;
+                    }
                 }
+                // Only remember it once the server has actually accepted it.
+                lastPlayersPayload = payloadJson;
             }
 
             if (collectionLog != null)
@@ -258,11 +322,30 @@ public class SyncService
     private JsonArray buildCombatAchievements(Client client)
     {
         JsonArray completed = new JsonArray();
-        for (CombatAchievement task : CombatAchievement.values())
+        for (int enumId : CA_TIER_ENUMS)
         {
-            if (task.isCompleted(client))
+            var tierEnum = client.getEnum(enumId);
+            if (tierEnum == null) continue;
+
+            for (int structId : tierEnum.getIntVals())
             {
-                completed.add(task.getTaskName());
+                var struct = client.getStructComposition(structId);
+                if (struct == null) continue;
+
+                String name = struct.getStringValue(CA_PARAM_TASK_NAME);
+                if (name == null || name.isEmpty()) continue;
+
+                // The task's real bit index, straight from the cache.
+                int id = struct.getIntValue(CA_PARAM_TASK_ID);
+                if (id < 0) continue;
+
+                int varpIndex = id / 32;
+                if (varpIndex >= CA_TASK_VARPS.length) continue;
+
+                if ((client.getVarpValue(CA_TASK_VARPS[varpIndex]) & (1 << (id % 32))) != 0)
+                {
+                    completed.add(name);
+                }
             }
         }
         return completed;

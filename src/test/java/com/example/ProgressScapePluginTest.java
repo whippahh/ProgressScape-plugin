@@ -1,13 +1,13 @@
 package com.whippahh.progressscape;
 
+import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
-import org.junit.Test;
 
 public class ProgressScapePluginTest
 {
-    @Test
-    public void testPlugin()
-    {
-        ExternalPluginManager.loadBuiltin(ProgressScapePlugin.class);
-    }
+	public static void main(String[] args) throws Exception
+	{
+		ExternalPluginManager.loadBuiltin(ProgressScapePlugin.class);
+		RuneLite.main(args);
+	}
 }

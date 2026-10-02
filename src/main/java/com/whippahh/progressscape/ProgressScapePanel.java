@@ -36,7 +36,7 @@ public class ProgressScapePanel extends PluginPanel
 
         JButton syncButton = new JButton("Sync Collection Log");
         syncButton.setToolTipText("Open your Collection Log in-game, then click this");
-        syncButton.addActionListener(e -> plugin.syncNow(true));
+        syncButton.addActionListener(e -> plugin.syncNowOnClientThread(true));
         centrePanel.add(syncButton);
 
         JLabel websiteLink = new JLabel("<html><a href=''>progressscape.net</a></html>");

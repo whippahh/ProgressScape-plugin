@@ -65,6 +65,12 @@ public class ProgressScapePlugin extends Plugin
 	private ProgressScapePanel panel;
 	private NavigationButton navButton;
 	private boolean pendingLoginSync = false;
+	// GameState.LOGGED_IN does NOT only fire at login — it fires again after
+	// every world hop and every region load. Syncing on each one rewrote the
+	// player's entire row (all quests, all diaries, every CA, every boss KC)
+	// dozens of times a session, which was consuming the database's disk IO
+	// budget. This gates it to one sync per actual login.
+	private boolean syncedThisLogin = false;
 	private int collectionLogSyncCountdown = -1;
 
 	@Override
@@ -94,12 +100,32 @@ public class ProgressScapePlugin extends Plugin
 	{
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			pendingLoginSync = true;
+			if (!syncedThisLogin)
+			{
+				pendingLoginSync = true;
+			}
+			else
+			{
+				// Makes the gate visible in the log — otherwise a suppressed
+				// hop is indistinguishable from the event never firing.
+				log.debug("ProgressScape: already synced this login, skipping (world hop or region load)");
+			}
 		}
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
-			syncNow(false);
+			// Reaching the login screen is the only reliable "really logged
+			// out" signal — a world hop never passes through it — so this is
+			// where the per-login state gets reset.
+			//
+			// The syncNow(false) that used to be here was dead code: syncNow
+			// returns immediately unless the game state is LOGGED_IN, and by
+			// definition it isn't here. It never uploaded anything.
+			syncedThisLogin = false;
 			syncService.clearKCs();
+			// Captured collection log items are per-account. Without this,
+			// hopping to an alt in the same client session uploaded the
+			// previous account's collection log under the alt's name.
+			syncService.clearCollectionLog();
 		}
 	}
 
@@ -109,6 +135,7 @@ public class ProgressScapePlugin extends Plugin
 		if (pendingLoginSync)
 		{
 			pendingLoginSync = false;
+			syncedThisLogin = true;
 			syncNow(false);
 		}
 
